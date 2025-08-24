@@ -22,9 +22,9 @@ const fontkit = require("fontkit"); // For registering and embedding custom font
  */
 export interface GeneratePdfOptions {
   text: string; // Text content to render in the PDF
-  outputDir?: string;       // Optional output directory, overrides config
-  documentName?: string;    // Optional document name, overrides config
-  margin?: { top: number; left: number }; // Optional margin, overrides config
+  outputDirProp?: string;       // Optional output directory, overrides config
+  documentNameProp?: string;    // Optional document name, overrides config
+  marginProp?: { top: number; left: number }; // Optional margin, overrides config
 }
 
 /**
@@ -165,7 +165,7 @@ export function parseMarkup(line: string): TextFragment[] {
  * Returns the full path to the generated PDF.
  */
 export async function generatePdf({
-  text, outputDir:outputDirProp, margin:marginProp, documentName:documentNameProp
+  text, outputDirProp, marginProp, documentNameProp
 }: GeneratePdfOptions): Promise<string> {
   const config = await loadConfig(); // Load config from JSON or JS
 
