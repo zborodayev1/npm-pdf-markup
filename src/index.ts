@@ -43,6 +43,7 @@ type TextFragment = {
   italic?: boolean; // Italic style
   fontSize?: number; // Font size
   color?: { r: number; g: number; b: number }; // RGB color
+  margin?: { top?: number; bottom?: number; left?: number; right?: number }; // margin 
 };
 
 /**
@@ -108,19 +109,28 @@ function resolveColor(color?: PdfColor) {
  * - <i>...</i> for italic
  * - <21>...</21> for font size
  * - <#FF0000>...</#> for color
+ * - <mt4>, <mb5>, <ml10>, <mr8> for margin (top, bottom, left, right)
+ * - </m> to reset margin
  */
 export function parseMarkup(line: string): TextFragment[] {
   const fragments: TextFragment[] = [];
-  let buffer = "";
+
+   // Current styles state
   let bold = false;
   let italic = false;
   let fontSize: number | undefined;
   let color: { r: number; g: number; b: number } | undefined;
 
-  const regex = /<(\/?b|\/?i|\/?\d+|#?[0-9A-Fa-f]{6})>/g;
+  // Current margin object applied to fragments
+  let currentMargin: { top?: number; bottom?: number; left?: number; right?: number } = {};
+
+  // Regex for parsing tags in line
+  const regex = /<(\/?b|\/?i|\/?\d+|#?[0-9A-Fa-f]{6}|m[trbl]\d+|\/m)>/g;
+  const marginRegex = /^m([trbl])(\d+)$/;
   let lastIndex = 0;
 
   for (const match of line.matchAll(regex)) {
+    // Push text between previous tag and current tag
     if (match.index! > lastIndex) {
       fragments.push({
         text: line.slice(lastIndex, match.index),
@@ -128,22 +138,42 @@ export function parseMarkup(line: string): TextFragment[] {
         italic,
         fontSize,
         color,
+        margin: { ...currentMargin }, // clone current margin for this fragment
       });
     }
 
     const tag = match[1];
+    // Update styles based on tag
     if (tag === "b") bold = true;
     else if (tag === "/b") bold = false;
+
     else if (tag === "i") italic = true;
     else if (tag === "/i") italic = false;
+
     else if (/^\d+$/.test(tag)) fontSize = parseInt(tag, 10);
     else if (/^\/\d+$/.test(tag)) fontSize = undefined;
+
     else if (tag.startsWith("#")) color = hexToRgb(tag);
     else if (tag.startsWith("/#")) color = undefined;
+     // Reset margin if closing tag
+    else if (tag === "/m") {
+      currentMargin = {};
+    } else {
+      // Parse margin tags: mt, mb, ml, mr
+      const m = tag.match(marginRegex);
+      if (m) {
+        const dir = m[1];       // t/r/b/l
+        const value = parseInt(m[2], 10);
+        if (dir === "t") currentMargin.top = value;
+        else if (dir === "b") currentMargin.bottom = value;
+        else if (dir === "l") currentMargin.left = value;
+        else if (dir === "r") currentMargin.right = value;
+      }
+    }
 
     lastIndex = match.index! + match[0].length;
-  }
-
+}
+  // Push remaining text after last tag
   if (lastIndex < line.length) {
     fragments.push({
       text: line.slice(lastIndex),
@@ -151,6 +181,7 @@ export function parseMarkup(line: string): TextFragment[] {
       italic,
       fontSize,
       color,
+      margin: { ...currentMargin },
     });
   }
 
@@ -196,16 +227,21 @@ export async function generatePdf({
   const fonts = await loadFonts(pdfDoc, __dirname, config.fontPaths); // Load custom fonts
   const lineHeight = config.lineHeight ?? fontSize + 10;
   const color = resolveColor(config.color);
+  
 
   let y = height - margin.top;
 
   // Render each line of text
   for (const line of text.split("\n")) {
     const fragments = parseMarkup(line);
+
+    const lineMt = Math.max(...fragments.map(f => f.margin?.top ?? 0));  // apply top margin of the line
+    y -= lineMt;
+
     let x = margin.left;
 
     for (const frag of fragments) {
-      const usedFont =
+      const usedFont = 
         frag.bold && frag.italic
           ? fonts.boldItalic
           : frag.bold
@@ -216,9 +252,12 @@ export async function generatePdf({
 
       const size = frag.fontSize ?? fontSize;
 
+      const fragX = x + (frag.margin?.left ?? 0);  // apply left margin of fragment
+      const fragY = y;
+
       page.drawText(frag.text, {
-        x,
-        y,
+        x: fragX,
+        y: fragY,
         size,
         font: usedFont,
         color: frag.color
@@ -226,10 +265,11 @@ export async function generatePdf({
           : color,
       });
 
-      x += usedFont.widthOfTextAtSize(frag.text, size); // Move x for next fragment
+      x += usedFont.widthOfTextAtSize(frag.text, size) + (frag.margin?.right ?? 0);  // apply right margin
     }
 
-    y -= lineHeight; // Move y for next line
+    const lineMb = Math.max(...fragments.map(f => f.margin?.bottom ?? 0)); // apply bottom margin of line
+    y -= lineHeight + lineMb; 
   }
 
   // Save PDF to disk
@@ -238,3 +278,4 @@ export async function generatePdf({
 
   return filePath;
 }
+
